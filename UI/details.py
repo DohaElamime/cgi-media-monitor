@@ -24,6 +24,91 @@ MIN_SUMMARY_LENGTH = 450
 MAX_SUMMARY_LENGTH = 1500
 
 
+
+# ==========================================================
+# COOKIE / PRIVACY DETECTION
+# ==========================================================
+
+# Pages de type fiche technique / données de marché.
+# Elles ne doivent pas afficher un petit extrait SEO comme résumé éditorial.
+MARKET_TECHNICAL_PAGE_PATTERNS = [
+    "bourse de casablanca - liste des fiche-technique",
+    "bourse de casablanca liste des fiche-technique",
+    "liste des fiche-technique",
+    "liste des fiches techniques",
+    "fiche-technique",
+    "fiche technique",
+]
+
+
+def is_market_technical_page(title):
+    normalized = clean_text(title).lower()
+
+    if not normalized:
+        return False
+
+    return any(
+        pattern in normalized
+        for pattern in MARKET_TECHNICAL_PAGE_PATTERNS
+    )
+
+
+COOKIE_PRIVACY_PATTERNS = [
+    "nous utilisons des cookies",
+    "nous utilisons les cookies",
+    "vos préférences des cookies",
+    "préférences des cookies",
+    "politique de confidentialité",
+    "politique de vie privée",
+    "politique de vie privee",
+    "mémoire locale",
+    "memoire locale",
+    "accepter ou refuser",
+    "accepter les cookies",
+    "refuser les cookies",
+    "contenu personnalisé",
+    "contenu personnalise",
+    "cookies permettant d'afficher",
+    "cookies nécessaires",
+    "cookies necessaires",
+    "privacy policy",
+    "cookie policy",
+    "cookie preferences",
+]
+
+
+def is_cookie_privacy_content(text):
+    """Détecte une bannière cookies / confidentialité."""
+    normalized = clean_text(text).lower()
+
+    if not normalized:
+        return False
+
+    matches = sum(
+        1 for pattern in COOKIE_PRIVACY_PATTERNS
+        if pattern in normalized
+    )
+
+    if matches >= 2:
+        return True
+
+    if (
+        "cookies" in normalized
+        and (
+            "préférences" in normalized
+            or "preferences" in normalized
+        )
+        and (
+            "mémoire locale" in normalized
+            or "memoire locale" in normalized
+            or "navigateur" in normalized
+        )
+    ):
+        return True
+
+    return False
+
+
 # ==========================================================
 # NETTOYAGE TEXTE
 # ==========================================================
@@ -90,6 +175,9 @@ def clean_summary(
     text = clean_text(
         summary
     )
+
+    if is_cookie_privacy_content(text):
+        return ""
 
     if not text:
         return ""
@@ -321,6 +409,14 @@ def get_display_summary(
         or ""
     ).strip()
 
+    title = str(
+        selected.get(
+            "title",
+            "",
+        )
+        or ""
+    ).strip()
+
     raw_summary = (
         selected.get(
             "summary",
@@ -358,6 +454,28 @@ def get_display_summary(
         content
     )
 
+    if is_cookie_privacy_content(clean_content):
+        clean_content = ""
+
+    # ======================================================
+    # CAS SPÉCIAL : PAGE FICHE TECHNIQUE / MARCHÉ
+    # ======================================================
+    #
+    # Le petit texte SEO stocké dans "summary" n'est jamais utilisé
+    # directement pour ces pages. Si le contenu réel est suffisamment
+    # riche, on construit l'extrait à partir de celui-ci.
+    if is_market_technical_page(title):
+        if len(clean_content) >= MIN_SUMMARY_LENGTH:
+            technical_summary = build_summary_from_content(
+                clean_content,
+                MAX_SUMMARY_LENGTH,
+            )
+
+            if len(technical_summary) >= MIN_SUMMARY_LENGTH:
+                return technical_summary
+
+        return ""
+
     # ======================================================
     # CAS 1
     # Résumé Google News brut
@@ -376,12 +494,16 @@ def get_display_summary(
 
         if clean_content:
 
-            return build_summary_from_content(
+            content_summary = build_summary_from_content(
                 clean_content,
                 MAX_SUMMARY_LENGTH,
             )
 
+            if len(content_summary) >= MIN_SUMMARY_LENGTH:
+                return content_summary
+
         return ""
+
 
     # ======================================================
     # CAS 3
@@ -390,28 +512,38 @@ def get_display_summary(
 
     if (
         len(summary) < MIN_SUMMARY_LENGTH
+        and len(clean_content) >= MIN_SUMMARY_LENGTH
         and len(clean_content) > len(summary)
     ):
 
-        # Construire un bloc plus riche à partir du contenu
+        # Construire un bloc plus riche à partir du contenu.
+        # Il doit obligatoirement atteindre la longueur minimale.
         content_excerpt = build_summary_from_content(
             clean_content,
             MAX_SUMMARY_LENGTH,
         )
 
-        if content_excerpt:
-
+        if len(content_excerpt) >= MIN_SUMMARY_LENGTH:
             return content_excerpt
+
+        # Le contenu ne permet pas de produire un résumé suffisamment
+        # riche : on n'affiche pas le résumé court.
+        return ""
 
     # ======================================================
     # CAS 4
     # Résumé déjà suffisamment long
     # ======================================================
 
-    return shorten_text(
+    final_summary = shorten_text(
         summary,
         MAX_SUMMARY_LENGTH,
     )
+
+    if is_cookie_privacy_content(final_summary):
+        return ""
+
+    return final_summary
 
 
 # ==========================================================
@@ -556,35 +688,6 @@ def render_details(
     )
 
     # ======================================================
-    # CONFIANCE
-    # ======================================================
-
-    try:
-
-        confidence = float(
-            selected.get(
-                "confidence",
-                0,
-            )
-            or 0
-        )
-
-    except (
-        TypeError,
-        ValueError,
-    ):
-
-        confidence = 0.0
-
-    confidence = max(
-        0.0,
-        min(
-            1.0,
-            confidence,
-        ),
-    )
-
-    # ======================================================
     # SENTIMENT
     # ======================================================
 
@@ -608,8 +711,8 @@ def render_details(
     # INFORMATIONS
     # ======================================================
 
-    col1, col2, col3 = st.columns(
-        3
+    col1, col2 = st.columns(
+        2
     )
 
     # ------------------------------------------------------
@@ -651,17 +754,6 @@ def render_details(
             st.info(
                 f"**{badge}**"
             )
-
-    # ------------------------------------------------------
-    # CONFIANCE
-    # ------------------------------------------------------
-
-    with col3:
-
-        st.metric(
-            "🤖 Confiance IA",
-            f"{confidence:.0%}",
-        )
 
     # ======================================================
     # RÉSUMÉ
