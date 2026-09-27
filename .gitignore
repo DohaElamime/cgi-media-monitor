@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment variables / secrets
+.env
+.env.*
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Keep the main project database
+!database/articles.db
+
+# Logs
+logs/
+*.log
+
+# Generated data
+*.csv
+*.json
+
+# Local models
+models/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Streamlit
+.streamlit/secrets.toml
+# Generated project data
+data/
+outputs/
